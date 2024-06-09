@@ -1,4 +1,4 @@
-version: '3.5'
+version: "3.5"
 
 services:
   etcd:
@@ -16,11 +16,13 @@ services:
     container_name: milvus-minio
     image: quay.io/minio/minio
     environment:
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/minio:/minio_data
-    command: minio server /minio_data
+    command: minio server /minio_data --console-address :9001
+    ports:
+      - "9001:9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
