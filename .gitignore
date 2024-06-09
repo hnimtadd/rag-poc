@@ -2,4 +2,5 @@
 volumes
 .vscode
 .env
-
+datasets/*
+**/.DS_Store
