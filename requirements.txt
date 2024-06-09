@@ -4,3 +4,12 @@ beautifulsoup4==4.12.3
 openai==1.33.0
 python-dotenv==1.0.1
 pymilvus==2.4.3
+sentence-transformers==3.0.1
+datasets==2.19.2
+tqdm==4.66.4
+matplotlib==3.9.0
+langchain==0.2.3
+langchain-community==0.2.4
+langchain-huggingface=0.0.3
+jupyter==1.0.0
+ipywidgets==8.1.3
