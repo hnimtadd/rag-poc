@@ -4,3 +4,6 @@ volumes
 .env
 datasets/*
 **/.DS_Store
+**/__pycache__
+**/*.jsonl
+**/*.json
