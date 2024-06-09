@@ -10,54 +10,39 @@ from pymilvus import (
 )
 from pymilvus.client.types import ExtraList
 
-from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM,
-    pipeline,
-    Pipeline,
-)
-
 
 from settings import COLLECTION_NAME
 from load_dataset import embed_query
+from llama_cpp import Llama
 
-READER_MODEL_NAME: str = "HuggingFaceH4/zephyr-7b-beta"
-model = AutoModelForCausalLM.from_pretrained(READER_MODEL_NAME)
-tokenizer = AutoTokenizer.from_pretrained(READER_MODEL_NAME)
 
-READER_LLM = pipeline(
-    model=model,
-    tokenizer=tokenizer,
-    task="text-generation",
-    do_sample=True,
-    temperature=0.2,
-    repetition_penalty=1.1,
-    return_full_text=False,
-    max_new_tokens=500,
+reader_llm = Llama(
+    model_path="./models/Phi-3-mini-4k-instruct-q4.gguf",
+    n_ctx=4096,
+    n_threads=8,
+    n_gpu_layers=35,
 )
 
-prompt_in_chat_format = [
-    {
-        "role": "system",
-        "content": """Using the information contained in the context,
-give a comprehensive answer to the question.
-Respond only to the question asked, response should be concise and relevant to the question.
-Provide the number of the source document when relevant.
-If the answer cannot be deduced from the context, do not give an answer.""",
-    },
-    {
-        "role": "user",
-        "content": """Context:
-{context}
----
-Now here is the question you need to answer.
 
-Question: {question}""",
-    },
-]
-RAG_PROMPT_TEMPLATE: str = tokenizer.apply_chat_template(
-    prompt_in_chat_format, tokenize=False, add_generation_prompt=True
-)  # type: ignore
+RAG_PROMPT_TEMPLATE = """
+<|system|>
+Using the information contained in the context,
+give a comprehensive answer to the question.
+Respond only to the question asked, response should be concise and
+relevant to the question.
+Provide the number of the source document when relevant.
+If the answer cannot be deduced from the context, do not give an answer,
+just say that you don't know the answer, and guide user to the right source.
+<|enc|>
+<|user|>
+Context: {context}
+----
+Now here is the question you need to answer.
+<|end|>
+
+Question: {question}
+<|assistant|>
+"""
 
 
 def search_relevant(
@@ -105,9 +90,9 @@ def search_relevant(
 def answer_with_rag(
     question: str,
     vector_client: MilvusClient,
-    llm: Pipeline,
+    llm: Llama,
     num_retrieved_docs: int = 30,
-    num_docs_final: int = 5,
+    num_docs_final: int = 2,
 ) -> Tuple[str, List[str]]:
     # Gather documents with retriever
     embedding = embed_query(question)
@@ -134,19 +119,31 @@ def answer_with_rag(
         question=question,
         context=context,
     )
+    print("=> Final prompt:", final_prompt)
 
     # Redact an answer
     print("=> Generating answer...")
-    answer: str = llm(final_prompt)[0]["generated_text"]  # type: ignore
+    # _anwser: str = llm(final_prompt)[0]["generated_text"]  # type: ignore
+    _anwser = llm(  # type: ignore
+        final_prompt,
+        max_tokens=256,  # Generate up to 256 tokens
+        stop=["<|end|>"],
+        echo=True,  # Whether to echo the prompt
+    )["choices"][0][
+        "text"
+    ]  # type: ignore
 
-    return answer, relevant_docs
+    return _anwser, relevant_docs
 
 
 if __name__ == "__main__":
-    query = input("Enter your query:")
     client = MilvusClient(uri="http://localhost:19530")
-    answer, relevant = answer_with_rag(query, client, READER_LLM)
-    print("==========================\nRelevant Documents:")
-    for doc in relevant:
-        print(doc)
-    print("==========================\nAnswer:", answer)
+    while True:
+        query = input("Enter your query:")
+        if query == "":
+            continue
+        answer, relevant = answer_with_rag(query, client, reader_llm)
+        print("==========================\nRelevant Documents:")
+        for doc in relevant:
+            print(doc)
+        print("==========================\nAnswer:", answer)

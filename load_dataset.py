@@ -186,6 +186,7 @@ async def pipe_line(
 
 
 async def main():
+    sorted_files = sorted(os.listdir(DATA_FOLDER))
     await asyncio.gather(
         *[
             pipe_line(
@@ -193,9 +194,9 @@ async def main():
                 data_folder=os.path.join(DATA_FOLDER, folder),
                 tokenizer_name=EMBEDDING_MODEL_NAME,
                 model_name=EMBEDDING_MODEL_NAME,
-                db_file="sample-aws_knowledge.jsonl",
+                db_file="aws_knowledge_v1.jsonl",
             )
-            for folder in os.listdir(DATA_FOLDER)[0:1]
+            for folder in sorted_files
         ]
     )
 
