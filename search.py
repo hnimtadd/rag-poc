@@ -3,25 +3,76 @@ perform search query by embed search and get out document that relevant
 to the query
 """
 
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Callable
 
 from pymilvus import (
     MilvusClient,
 )
 from pymilvus.client.types import ExtraList
 
+# from llama_cpp import Llama
+from transformers import pipeline
+
+import torch
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    AutoModelForSequenceClassification,
+)
 
 from settings import COLLECTION_NAME
 from load_dataset import embed_query
-from llama_cpp import Llama
 
+# READER_LLM = Llama(
+#     model_path="./models/Phi-3-mini-4k-instruct-q4.gguf",
+#     n_ctx=4096,
+#     n_threads=8,
+#     n_gpu_layers=35,
+# )
 
-reader_llm = Llama(
-    model_path="./models/Phi-3-mini-4k-instruct-q4.gguf",
-    n_ctx=4096,
-    n_threads=8,
-    n_gpu_layers=35,
+READER_MODEL_NAME = "BAAI/bge-m3"
+RERANKER_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
+
+model = AutoModelForCausalLM.from_pretrained(READER_MODEL_NAME)
+tokenizer = AutoTokenizer.from_pretrained(READER_MODEL_NAME)
+READER_LLM = pipeline(
+    model=model,
+    tokenizer=tokenizer,
+    task="text-generation",
+    do_sample=True,
+    temperature=0.2,
+    repetition_penalty=1.2,
+    return_full_text=False,
 )
+
+reranker_tokenizer = AutoTokenizer.from_pretrained(RERANKER_MODEL_NAME)
+RERANKER = AutoModelForSequenceClassification.from_pretrained(
+    RERANKER_MODEL_NAME,
+)
+RERANKER.eval()
+
+
+def rerank(question: str, document: List[str]) -> List[Tuple[str, str]]:
+    with torch.no_grad():
+        inputs = reranker_tokenizer(
+            [[question, doc] for doc in document],
+            padding=True,
+            truncation=True,
+            return_tensors="pt",
+        )
+        scores = (
+            RERANKER(**inputs, return_dict=True)
+            .logits.view(
+                -1,
+            )
+            .float()
+        )
+
+        return sorted(
+            zip(document, scores),
+            key=lambda x: x[1],
+            reverse=True,
+        )
 
 
 RAG_PROMPT_TEMPLATE = """
@@ -40,7 +91,6 @@ Context: {context}
 Now here is the question you need to answer.
 
 Question: {question}
-<|end|>
 <|assistant|>
 """
 
@@ -57,7 +107,6 @@ just say that you don't know the answer, and guide user to the right source.
 Now here is the question you need to answer.
 
 Question: {question}
-<|end|>
 <|assistant|>
 """
 
@@ -107,7 +156,8 @@ def search_relevant(
 def answer_with_rag(
     question: str,
     vector_client: MilvusClient,
-    llm: Llama,
+    llm=READER_LLM,
+    reranker: Optional[Callable] = None,
     num_retrieved_docs: int = 30,
     num_docs_final: int = 5,
 ) -> Tuple[str, List[str]]:
@@ -127,6 +177,9 @@ def answer_with_rag(
         num_retrieved_docs,
     )
 
+    if reranker:
+        print("=> Reranking documents...")
+        relevant_docs = reranker(query, relevant_docs)
     relevant_docs = relevant_docs[:num_docs_final]
 
     # Build the final prompt
@@ -143,22 +196,31 @@ def answer_with_rag(
 
     # Redact an answer
     print("=> Generating answer...")
-    # _anwser: str = llm(final_prompt)[0]["generated_text"]  # type: ignore
-    _anwser = llm(  # type: ignore
+
+    # _anwser = llm(  # type: ignore
+    #     final_prompt,
+    #     stop=["<|end|>"],
+    #     echo=False,  # Whether to echo the prompt
+    # )["choices"][0][
+    #     "text"
+    # ]  # type: ignore
+
+    _anwser: str = llm(  # type: ignore
         final_prompt,
-        stop=["<|end|>"],
-        echo=False,  # Whether to echo the prompt
-    )["choices"][0][
-        "text"
-    ]  # type: ignore
+    )[
+        0
+    ]["generated_text"]
 
     return _anwser, relevant_docs
 
 
 def answer_without_rag(
     question: str,
-    llm: Llama,
+    llm=READER_LLM,
 ) -> str:
+    """
+    try to answer without rag
+    """
     final_prompt = NORAG_PROMPT_TEMPLATE.format(
         question=question,
     )
@@ -184,8 +246,13 @@ if __name__ == "__main__":
         query = input("Enter your query:")
         if query == "":
             continue
-        answer, relevant = answer_with_rag(query, client, reader_llm)
-        answer_normal = answer_without_rag(query, reader_llm)
+        answer, relevant = answer_with_rag(
+            query,
+            client,
+            llm=READER_LLM,
+            reranker=RERANKER,
+        )
+        answer_normal = answer_without_rag(query)
         print("==========================\nRelevant Documents:")
         for doc in relevant:
             print(doc)

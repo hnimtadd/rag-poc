@@ -10,7 +10,8 @@ tqdm==4.66.4
 matplotlib==3.9.0
 langchain==0.2.3
 langchain-community==0.2.4
-langchain-huggingface=0.0.3
+langchain-huggingface==0.0.3
 jupyter==1.0.0
 ipywidgets==8.1.3
-llama-cpp-python
+llama_cpp_python==0.2.77
+RAGatouille==0.0.8.post2

@@ -10,7 +10,7 @@ from typing import Dict, List
 
 from langchain.docstore.document import Document as LangchainDocument
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceBgeEmbeddings
+from langchain_community.embeddings.huggingface import HuggingFaceBgeEmbeddings
 from transformers import AutoTokenizer
 
 warnings.simplefilter(action="ignore", category=FutureWarning)

@@ -120,15 +120,14 @@ def insert_data(
         for document, embedding in data.items()
     ]
     try:
-        response: Dict[Any, Any] = _client.insert(
+        _: Dict[Any, Any] = _client.insert(
             collection_name=name,
             data=enities,
         )
     except exceptions.MilvusException as e:
         print("cannot insert data", str(e))
-        print(data)
         return
-    print(response, "inserted into vector db")
+    print("inserted into vector db")
 
 
 pd.options.display.max_rows = 100
