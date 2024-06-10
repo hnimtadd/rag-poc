@@ -140,7 +140,7 @@ if __name__ == "__main__":
 
     # read jsonl file in chunk with pd, each line of the jsonl is a dictionary
     df = pd.read_json(
-        "aws_knowledge.jsonl",
+        "aws_knowledge_v1.jsonl",
         lines=True,
         chunksize=100,
         typ="series",
@@ -148,8 +148,9 @@ if __name__ == "__main__":
 
     # loop in chunk, each line of the json is a dictionary
     # (which is a dict with key is string and value is list of float)
-
     for chunk in df:
+        chunk_dict: Dict[str, List[float]] = {}
         for val in chunk.values:
             knowledge: Dict[str, List[float]] = val
-            insert_data(client, COLLECTION_NAME, knowledge)
+            chunk_dict.update(knowledge)
+        insert_data(client, COLLECTION_NAME, chunk_dict)

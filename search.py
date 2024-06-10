@@ -1,6 +1,6 @@
 """
 perform search query by embed search and get out document that relevant
-to the query 
+to the query
 """
 
 from typing import List, Tuple
@@ -38,9 +38,26 @@ just say that you don't know the answer, and guide user to the right source.
 Context: {context}
 ----
 Now here is the question you need to answer.
-<|end|>
 
 Question: {question}
+<|end|>
+<|assistant|>
+"""
+
+
+NORAG_PROMPT_TEMPLATE = """
+<|system|>
+You are the chat bot with respond to answer user question
+Respond only to the question asked, response should be concise and
+relevant to the question.
+If the answer cannot be deduced from the context, do not give an answer,
+just say that you don't know the answer, and guide user to the right source.
+<|enc|>
+<|user|>
+Now here is the question you need to answer.
+
+Question: {question}
+<|end|>
 <|assistant|>
 """
 
@@ -92,8 +109,11 @@ def answer_with_rag(
     vector_client: MilvusClient,
     llm: Llama,
     num_retrieved_docs: int = 30,
-    num_docs_final: int = 2,
+    num_docs_final: int = 5,
 ) -> Tuple[str, List[str]]:
+    """
+    try to answer without providing the context
+    """
     # Gather documents with retriever
     embedding = embed_query(question)
     print("=> Retrieving documents...")
@@ -126,14 +146,36 @@ def answer_with_rag(
     # _anwser: str = llm(final_prompt)[0]["generated_text"]  # type: ignore
     _anwser = llm(  # type: ignore
         final_prompt,
-        max_tokens=256,  # Generate up to 256 tokens
         stop=["<|end|>"],
-        echo=True,  # Whether to echo the prompt
+        echo=False,  # Whether to echo the prompt
     )["choices"][0][
         "text"
     ]  # type: ignore
 
     return _anwser, relevant_docs
+
+
+def answer_without_rag(
+    question: str,
+    llm: Llama,
+) -> str:
+    final_prompt = NORAG_PROMPT_TEMPLATE.format(
+        question=question,
+    )
+    print("=> Final prompt:", final_prompt)
+
+    # Redact an answer
+    print("=> Generating answer...")
+    # _anwser: str = llm(final_prompt)[0]["generated_text"]  # type: ignore
+    _anwser = llm(  # type: ignore
+        final_prompt,
+        stop=["<|end|>"],
+        echo=False,  # Whether to echo the prompt
+    )["choices"][0][
+        "text"
+    ]  # type: ignore
+
+    return _anwser
 
 
 if __name__ == "__main__":
@@ -143,7 +185,19 @@ if __name__ == "__main__":
         if query == "":
             continue
         answer, relevant = answer_with_rag(query, client, reader_llm)
+        answer_normal = answer_without_rag(query, reader_llm)
         print("==========================\nRelevant Documents:")
         for doc in relevant:
             print(doc)
-        print("==========================\nAnswer:", answer)
+
+        print(
+            "==========================\n"
+            f"Answer with rag: {answer} "
+            "==========================",
+        )
+
+        print(
+            "==========================\n"
+            f"Answer without rag: {answer_normal}"
+            "==========================",
+        )
