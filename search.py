@@ -10,40 +10,25 @@ from pymilvus import (
 )
 from pymilvus.client.types import ExtraList
 
-# from llama_cpp import Llama
-from transformers import pipeline
+from llama_cpp import Llama
 
 import torch
 from transformers import (
     AutoTokenizer,
-    AutoModelForCausalLM,
     AutoModelForSequenceClassification,
 )
 
 from settings import COLLECTION_NAME
 from load_dataset import embed_query
 
-# READER_LLM = Llama(
-#     model_path="./models/Phi-3-mini-4k-instruct-q4.gguf",
-#     n_ctx=4096,
-#     n_threads=8,
-#     n_gpu_layers=35,
-# )
-
-READER_MODEL_NAME = "BAAI/bge-m3"
-RERANKER_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
-
-model = AutoModelForCausalLM.from_pretrained(READER_MODEL_NAME)
-tokenizer = AutoTokenizer.from_pretrained(READER_MODEL_NAME)
-READER_LLM = pipeline(
-    model=model,
-    tokenizer=tokenizer,
-    task="text-generation",
-    do_sample=True,
-    temperature=0.2,
-    repetition_penalty=1.2,
-    return_full_text=False,
+READER_LLM = Llama(
+    model_path="./models/Phi-3-mini-4k-instruct-q4.gguf",
+    n_ctx=4096,
+    n_threads=8,
+    n_gpu_layers=35,
 )
+
+RERANKER_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
 
 reranker_tokenizer = AutoTokenizer.from_pretrained(RERANKER_MODEL_NAME)
 RERANKER = AutoModelForSequenceClassification.from_pretrained(
@@ -52,14 +37,17 @@ RERANKER = AutoModelForSequenceClassification.from_pretrained(
 RERANKER.eval()
 
 
-def rerank(question: str, document: List[str]) -> List[Tuple[str, str]]:
+def rerank(question: str, documents: List[str]) -> List[str]:
     with torch.no_grad():
+        pairs = [[question, doc] for doc in documents]
         inputs = reranker_tokenizer(
-            [[question, doc] for doc in document],
+            pairs,
             padding=True,
             truncation=True,
             return_tensors="pt",
+            max_length=1024,
         )
+
         scores = (
             RERANKER(**inputs, return_dict=True)
             .logits.view(
@@ -68,11 +56,8 @@ def rerank(question: str, document: List[str]) -> List[Tuple[str, str]]:
             .float()
         )
 
-        return sorted(
-            zip(document, scores),
-            key=lambda x: x[1],
-            reverse=True,
-        )
+        # return list of document string
+        return [doc for _, doc in sorted(zip(scores, documents), reverse=True)]
 
 
 RAG_PROMPT_TEMPLATE = """
@@ -179,13 +164,13 @@ def answer_with_rag(
 
     if reranker:
         print("=> Reranking documents...")
-        relevant_docs = reranker(query, relevant_docs)
+        relevant_docs = reranker(question, relevant_docs)
     relevant_docs = relevant_docs[:num_docs_final]
 
     # Build the final prompt
     context = "\nExtracted documents:\n"
     context += "".join(
-        [f"Document {str(i)}:::\n" + doc for i, doc in enumerate(relevant_docs)]
+        [f"Document {str(i)}:::\n" + doc for i, doc in enumerate(relevant_docs)]  # noqa
     )
 
     final_prompt = RAG_PROMPT_TEMPLATE.format(
@@ -197,19 +182,14 @@ def answer_with_rag(
     # Redact an answer
     print("=> Generating answer...")
 
-    # _anwser = llm(  # type: ignore
-    #     final_prompt,
-    #     stop=["<|end|>"],
-    #     echo=False,  # Whether to echo the prompt
-    # )["choices"][0][
-    #     "text"
-    # ]  # type: ignore
-
-    _anwser: str = llm(  # type: ignore
+    _anwser = llm(  # type: ignore
         final_prompt,
-    )[
-        0
-    ]["generated_text"]
+        stop=["<|end|>"],
+        echo=False,  # Whether to echo the prompt
+        max_tokens=2048,  # Generate up to 256 tokens
+    )["choices"][0][
+        "text"
+    ]  # type: ignore
 
     return _anwser, relevant_docs
 
@@ -232,6 +212,7 @@ def answer_without_rag(
     _anwser = llm(  # type: ignore
         final_prompt,
         stop=["<|end|>"],
+        max_tokens=2048,  # Generate up to 256 tokens
         echo=False,  # Whether to echo the prompt
     )["choices"][0][
         "text"
@@ -250,7 +231,7 @@ if __name__ == "__main__":
             query,
             client,
             llm=READER_LLM,
-            reranker=RERANKER,
+            reranker=rerank,
         )
         answer_normal = answer_without_rag(query)
         print("==========================\nRelevant Documents:")
@@ -258,13 +239,11 @@ if __name__ == "__main__":
             print(doc)
 
         print(
-            "==========================\n"
-            f"Answer with rag: {answer} "
+            "==========================\n" "Answer with rag:  " + answer,
             "==========================",
         )
 
         print(
-            "==========================\n"
-            f"Answer without rag: {answer_normal}"
+            "==========================\n" "Answer without rag:  " + answer,
             "==========================",
         )
